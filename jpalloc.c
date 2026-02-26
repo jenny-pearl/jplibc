@@ -11,11 +11,11 @@
 #define MiB(x) ((uint32_t)(x) << 20)
 
 typedef struct {
-	bool used;
+	int32_t used;  // works as a bool
+	uint32_t size;
 	uint32_t prev; // set to -1 to denote that there are no previous
 		       // To find the start of the previous chunk
 		       // pointerToThisChunk - prev
-	uint32_t size;
 } ChunkInfo;
 
 typedef struct {
@@ -66,8 +66,8 @@ void *jp_alloc(uint32_t wantedSize)
 
 	uint32_t i = 0;
 
-	for (char *p = chunk + 1; i < chunk->size; i++) {
-		*p = 0;
+	for (char *p = (char*)chunk + sizeof(ChunkInfo); i < chunk->size; i++) {
+		*(p + i) = 0;
 	}
 
 	heapInfo.available -= wantedSize + sizeof(ChunkInfo);
@@ -83,6 +83,69 @@ void *jp_alloc(uint32_t wantedSize)
 
 void jp_free(void *pointer)
 {
+	ChunkInfo *chunkToBeDeleted = (void*)pointer - sizeof(ChunkInfo);
+	pointer = NULL;
+
+	ChunkInfo *prev = (void*)chunkToBeDeleted - chunkToBeDeleted->prev - sizeof(ChunkInfo);
+	ChunkInfo *next = (void*)chunkToBeDeleted + chunkToBeDeleted->size + sizeof(ChunkInfo);
+
+	int32_t usage = (next->used << 1) | (prev->used);
+	uint32_t chunkAddage = 0;
+
+	char *p = NULL;
+	ChunkInfo *twoChunkOver = (void*)next + next->size + sizeof(ChunkInfo);
+
+	switch (usage) {
+	case 0:
+		prev->size += next->size + chunkToBeDeleted->size + 2 * sizeof(ChunkInfo);
+
+		p = (void*)prev + sizeof(ChunkInfo);
+
+		for (int32_t i = 0; i < prev->size; i++) {
+			*(p + i) = 0;
+		}
+
+		twoChunkOver->prev = prev->size;
+
+		break;
+	case 1:
+		prev->size += chunkToBeDeleted->size + sizeof(ChunkInfo);
+
+		p = (void*)prev + sizeof(ChunkInfo);
+
+		for (int32_t i = 0; i < prev->size; i++) {
+			*(p + i) = 0;
+		}
+
+		next->prev = prev->size;
+
+		break;
+	case 2:
+		chunkToBeDeleted->size += next->size + sizeof(ChunkInfo);
+
+		p = (void*)prev + sizeof(ChunkInfo);
+
+		for (int32_t i = 0; i < chunkToBeDeleted->size; i++) {
+			*(p + i) = 0;
+		}
+
+		twoChunkOver->prev = chunkToBeDeleted->size;
+
+		break;
+	case 3:
+		chunkToBeDeleted->used = 0;
+
+		p = (void*)chunkToBeDeleted + sizeof(ChunkInfo);
+
+		for (int32_t i = 0; i < chunkToBeDeleted->size; i++) {
+			*(p + i) = 0;
+		}
+
+		break;
+	default:
+		fprintf(stderr, "UNREACHABLE\n");
+		return;
+	}
 
 	return;
 }
