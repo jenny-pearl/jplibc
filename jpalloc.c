@@ -11,7 +11,7 @@
 #define MiB(x) ((uint32_t)(x) << 20)
 
 typedef struct {
-	int32_t used;  // works as a bool
+	bool used;  // works as a bool
 	uint32_t size;
 	uint32_t prev; // set to -1 to denote that there are no previous
 		       // To find the start of the previous chunk
@@ -53,14 +53,15 @@ void *jp_alloc(uint32_t wantedSize)
 		chunk = (void*)chunk + sizeof(ChunkInfo) + chunk->size;
 	}
 
-	if (chunk - heapInfo.start == heapInfo.initialSize) {
+	if ((void*)(heapInfo.start) + heapInfo.initialSize <
+		(void*)chunk - sizeof(ChunkInfo) - wantedSize) {
 		return NULL;
 	}
 
 	chunk->prev = prevSize;
 	chunk->used = 1;
 
-	uint32_t preAllocationSize = chunk->size;
+	uint32_t nextSize = chunk->size - wantedSize - sizeof(ChunkInfo);
 
 	chunk->size = wantedSize;
 
@@ -70,15 +71,15 @@ void *jp_alloc(uint32_t wantedSize)
 		*(p + i) = 0;
 	}
 
-	heapInfo.available -= wantedSize + sizeof(ChunkInfo);
+	heapInfo.available -= wantedSize + 2 * sizeof(ChunkInfo);
 
 	ChunkInfo *next = (void*)chunk + chunk->size + sizeof(ChunkInfo);
 
-	next->size = preAllocationSize;
+	next->size = nextSize;
 	next->used = 0;
 	next->prev = wantedSize;
 
-	return chunk + 1;
+	return (void*)chunk + sizeof(ChunkInfo);
 }
 
 void jp_free(void *pointer)
@@ -89,62 +90,56 @@ void jp_free(void *pointer)
 	ChunkInfo *prev = (void*)chunkToBeDeleted - chunkToBeDeleted->prev - sizeof(ChunkInfo);
 	ChunkInfo *next = (void*)chunkToBeDeleted + chunkToBeDeleted->size + sizeof(ChunkInfo);
 
-	int32_t usage = (next->used << 1) | (prev->used);
-	uint32_t chunkAddage = 0;
-
-	char *p = NULL;
 	ChunkInfo *twoChunkOver = (void*)next + next->size + sizeof(ChunkInfo);
 
-	switch (usage) {
-	case 0:
+	if ((void*)twoChunkOver - (void*)heapInfo.start <= heapInfo.initialSize) {
+		twoChunkOver = NULL;
+	}
+
+	if (prev->used == 0 && next->used == 0) {
 		prev->size += next->size + chunkToBeDeleted->size + 2 * sizeof(ChunkInfo);
 
-		p = (void*)prev + sizeof(ChunkInfo);
+		char *p = (void*)prev + sizeof(ChunkInfo);
 
 		for (int32_t i = 0; i < prev->size; i++) {
 			*(p + i) = 0;
 		}
 
-		twoChunkOver->prev = prev->size;
-
-		break;
-	case 1:
+		if (twoChunkOver != NULL) {
+			twoChunkOver->prev = prev->size;
+		}
+	} else if (prev->used == 0 && next->used == 1) {
 		prev->size += chunkToBeDeleted->size + sizeof(ChunkInfo);
 
-		p = (void*)prev + sizeof(ChunkInfo);
+		char *p = (void*)prev + sizeof(ChunkInfo);
 
 		for (int32_t i = 0; i < prev->size; i++) {
 			*(p + i) = 0;
 		}
 
 		next->prev = prev->size;
-
-		break;
-	case 2:
+	} else if (prev->used == 1 && next->used == 0) {
 		chunkToBeDeleted->size += next->size + sizeof(ChunkInfo);
 
-		p = (void*)prev + sizeof(ChunkInfo);
+		char *p = (void*)prev + sizeof(ChunkInfo);
 
 		for (int32_t i = 0; i < chunkToBeDeleted->size; i++) {
 			*(p + i) = 0;
 		}
 
-		twoChunkOver->prev = chunkToBeDeleted->size;
-
-		break;
-	case 3:
+		if (twoChunkOver != NULL) {
+			twoChunkOver->prev = chunkToBeDeleted->size;
+		}
+	} else if (prev->used == 1 && next->used == 1) {
 		chunkToBeDeleted->used = 0;
 
-		p = (void*)chunkToBeDeleted + sizeof(ChunkInfo);
+		char *p = (void*)chunkToBeDeleted + sizeof(ChunkInfo);
 
 		for (int32_t i = 0; i < chunkToBeDeleted->size; i++) {
 			*(p + i) = 0;
 		}
-
-		break;
-	default:
+	} else {
 		fprintf(stderr, "UNREACHABLE\n");
-		return;
 	}
 
 	return;
@@ -153,18 +148,10 @@ void jp_free(void *pointer)
 int main(void)
 {
 	int *p = jp_alloc(sizeof(int));
-	printf("%p\n", p);
-	p = (void *)p - sizeof(ChunkInfo);
-	printf("%p\n", p);
-	printf("%u\n", ((ChunkInfo *)p)->size);
-	printf("%d\n", ((ChunkInfo *)p)->used);
-	printf("%d\n", ((ChunkInfo *)p)->prev);
+	*p = 3;
 
 	int *pointer = jp_alloc(sizeof(int));
-	printf("%p\n", pointer);
-	pointer = (void *)pointer - sizeof(ChunkInfo);
-	printf("%p\n", pointer);
-	printf("%u\n", ((ChunkInfo *)pointer)->size);
-	printf("%d\n", ((ChunkInfo *)pointer)->used);
-	printf("%d\n", ((ChunkInfo *)pointer)->prev);
+	*pointer = 3;
+
+	jp_free(pointer);
 }
