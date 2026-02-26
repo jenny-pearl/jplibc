@@ -64,7 +64,9 @@ void *jp_alloc(uint32_t wantedSize)
 
 	chunk->size = wantedSize;
 
-	for (char *p = (char*)chunk, int32_t i = 0; i < chunk->size; i++) {
+	uint32_t i = 0;
+
+	for (char *p = chunk + 1; i < chunk->size; i++) {
 		*p = 0;
 	}
 
@@ -74,14 +76,14 @@ void *jp_alloc(uint32_t wantedSize)
 
 	next->size = preAllocationSize;
 	next->used = 0;
-	next->prev = sizeof(ChunkInfo) + wantedSize;
+	next->prev = wantedSize;
 
 	return chunk + 1;
 }
 
 void jp_free(void *pointer)
 {
-	// Check for chunks before and after the freed chunk to avoid fragmentation
+
 	return;
 }
 
