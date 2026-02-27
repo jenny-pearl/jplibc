@@ -1,4 +1,3 @@
-#include <stdio.h>
 #include <unistd.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -11,11 +10,11 @@
 #define MiB(x) ((uint32_t)(x) << 20)
 
 typedef struct {
-	bool used;  // works as a bool
+	bool used;
 	uint32_t size;
-	uint32_t prev; // set to -1 to denote that there are no previous
-		       // To find the start of the previous chunk
-		       // pointerToThisChunk - prev
+	uint32_t prev;	// set to -1 to denote that there are no previous
+			// To find the start of the previous ChunkInfo
+			// pointerToThisChunk - prev - sizeof(ChunkInfo)
 } ChunkInfo;
 
 typedef struct {
