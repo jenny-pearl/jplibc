@@ -281,8 +281,15 @@ uint64_t string_to_unsigned_integer(String *string)
 double string_to_double(String *string)
 {
 	double temp = 0.0f;
-	uint32_t index;
-	for (index = 0; index < string->count && string->content[index] != '.'; index++) {
+	uint32_t index = 0;
+	uint8_t negative = 0;
+
+	if (*string->content == '-') {
+		negative = 1;
+		index++;
+	}
+
+	for (; index < string->count && string->content[index] != '.'; index++) {
 		temp *= 10;
 		temp += (string->content[index] - 48);
 	}
@@ -293,16 +300,16 @@ double string_to_double(String *string)
 		temp += (double)(string->content[index] - 48) / (double)digitValue;
 	}
 
-	return temp;
+	return negative == 0 ? temp : -temp;
 }
 
 int main(void)
 {
-	String string = string_from_cstr("-2334");
+	String string = string_from_cstr("-2334.043");
 
-	int64_t temp = string_to_signed_integer(&string);
+	double temp = string_to_double(&string);
 
-	printf("%lld\n", temp);
+	printf("%lf\n", temp);
 
 	return 0;
 }
