@@ -5,6 +5,14 @@
 
 #define INITIAL_COUNT 64
 
+typedef enum {
+	SUCCESS,
+	NULL_PTR_DEREFERENCE,
+	OVERLAPPING_REGIONS,
+	SAME_MEMORY_AREA,
+	FAILED_STDLIB,
+} ReturnValue;
+
 typedef struct {
 	uint32_t count;
 	uint32_t capacity;
@@ -233,17 +241,24 @@ void discard_space(String *string)
 	return;
 }
 
-void read_file_into_string(String *string, FILE *fp)
+ReturnValue read_file_into_string(String *string, FILE *fp)
 {
 	while (!feof(fp)) {
 		if (string->count >= string->capacity) {
 			if (string->capacity == 0) string->capacity = INITIAL_COUNT;
 			else string->capacity *= 2;
 
-			string->content = realloc(string->content, string->capacity * sizeof(char));
+			string->content = realloc(string->content,
+				string->capacity * sizeof(char));
+			if (string->content == NULL) {
+				return FAILED_STDLIB;
+			}
 		}
+
 		string->content[string->count++] = getc(fp);
 	}
+
+	return SUCCESS;
 }
 
 int64_t string_to_signed_integer(String *string)
@@ -301,6 +316,55 @@ double string_to_double(String *string)
 	}
 
 	return negative == 0 ? temp : -temp;
+}
+
+ReturnValue memory_move(void *destination, void *source, uint64_t countOfBytes)
+{
+	if (destination == source) {
+		return SAME_MEMORY_AREA;
+	}
+
+	if (!destination || !source) {
+		return NULL_PTR_DEREFERENCE;
+	}
+
+	if (destination > source && destination < source + countOfBytes) {
+		return OVERLAPPING_REGIONS;
+	} else if (destination < source && destination + countOfBytes > source) {
+		return OVERLAPPING_REGIONS;
+	}
+
+	for (uint64_t i = 0; i < countOfBytes; i++) {
+		*(destination + i) = *(source + i);
+	}
+
+	return SUCCESS;
+}
+
+ReturnValue memory_copy(void *destination, void *source, uint64_t countOfBytes)
+{
+	if (!destination || !source) {
+		return NULL_PTR_DEREFERENCE;
+	}
+
+	for (uint64_t i = 0; i < countOfBytes; i++) {
+		*(destination + i) = *(source + i);
+	}
+
+	return SUCCESS;
+}
+
+ReturnValue memory_zero(void *destination, uint64_t countOfBytes)
+{
+	if (destination == NULL) {
+		return NULL_PTR_DEREF;
+	}
+
+	for (uint64_t i = 0; i < countOfBytes; i++) {
+		*(destination + i) = 0;
+	}
+
+	return SUCCESS;
 }
 
 int main(void)
