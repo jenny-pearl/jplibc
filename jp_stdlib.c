@@ -1,5 +1,7 @@
 #include <unistd.h>
+#include <stdlib.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <sys/mman.h>
 
@@ -30,7 +32,7 @@ void *jp_alloc(uint32_t wantedSize)
 	if (heapInfo.start == NULL) {
 		heapInfo.start = mmap(NULL, MiB(1), PROT_READ | PROT_WRITE,
 				MAP_ANON | MAP_PRIVATE, -1, 0);
-		heapInfo.initialSize = MiB(1);
+		heapInfo.initialSize = MiB(10);
 		heapInfo.available = heapInfo.initialSize - sizeof(ChunkInfo);
 		heapInfo.start->used = 0;
 		heapInfo.start->prev = -1;
@@ -70,6 +72,13 @@ void *jp_alloc(uint32_t wantedSize)
 		*(p + i) = 0;
 	}
 
+	if (heapInfo.available < wantedSize + sizeof(ChunkInfo)) {
+		return NULL;
+	} else if (heapInfo.available < wantedSize + 2 * sizeof(ChunkInfo)) {
+		heapInfo.available = 0;
+		return (void*)chunk + sizeof(ChunkInfo);
+	}
+
 	heapInfo.available -= wantedSize + 2 * sizeof(ChunkInfo);
 
 	ChunkInfo *next = (void*)chunk + chunk->size + sizeof(ChunkInfo);
@@ -85,14 +94,40 @@ void jp_free(void *pointer)
 {
 	ChunkInfo *chunkToBeDeleted = (void*)pointer - sizeof(ChunkInfo);
 	pointer = NULL;
+	ChunkInfo *prev = NULL;
+	ChunkInfo *next = NULL;
+	ChunkInfo *twoChunkOver = NULL;
 
-	ChunkInfo *prev = (void*)chunkToBeDeleted - chunkToBeDeleted->prev - sizeof(ChunkInfo);
-	ChunkInfo *next = (void*)chunkToBeDeleted + chunkToBeDeleted->size + sizeof(ChunkInfo);
+	if (chunkToBeDeleted > heapInfo.start) {
+		 prev = (void*)chunkToBeDeleted - chunkToBeDeleted->prev - sizeof(ChunkInfo);
+	}
 
-	ChunkInfo *twoChunkOver = (void*)next + next->size + sizeof(ChunkInfo);
+	if (chunkToBeDeleted + chunkToBeDeleted->size < ((void*)heapInfo.start) + heapInfo.available) {
+		next = (void*)chunkToBeDeleted + chunkToBeDeleted->size + sizeof(ChunkInfo);
+	}
 
-	if ((void*)twoChunkOver - (void*)heapInfo.start <= heapInfo.initialSize) {
-		twoChunkOver = NULL;
+	if (next && (void*)next + next->size < ((void*)heapInfo.start) + heapInfo.available) {
+		twoChunkOver = (void*)next + next->size + sizeof(ChunkInfo);
+	}
+
+	if (!prev && !next) {
+		chunkToBeDeleted->used = 0;
+		return;
+	} else if (!prev) {
+		if (next->used == 0) {
+			chunkToBeDeleted->size += sizeof(ChunkInfo) + next->size;
+			chunkToBeDeleted->used = 0;
+		} else {
+			chunkToBeDeleted->used = 0;
+		}
+		return;
+	} else if (!next) {
+		if (prev->used == 0) {
+			prev->size += sizeof(ChunkInfo) + chunkToBeDeleted->size;
+		} else {
+			chunkToBeDeleted->used = 0;
+		}
+		return;
 	}
 
 	if (prev->used == 0 && next->used == 0) {
@@ -146,11 +181,9 @@ void jp_free(void *pointer)
 
 int main(void)
 {
-	int *p = jp_alloc(sizeof(int));
-	*p = 3;
-
-	int *pointer = jp_alloc(sizeof(int));
-	*pointer = 3;
-
-	jp_free(pointer);
+	int *pointer;
+	for (uint32_t i = 0; i < 10000; i++) {
+		pointer = jp_alloc(sizeof(int));
+		jp_free(pointer);
+	}
 }

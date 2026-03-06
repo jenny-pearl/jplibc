@@ -366,14 +366,3 @@ ReturnValue memory_zero(void *destination, uint64_t countOfBytes)
 
 	return SUCCESS;
 }
-
-int main(void)
-{
-	String string = string_from_cstr("-2334.043");
-
-	double temp = string_to_double(&string);
-
-	printf("%lf\n", temp);
-
-	return 0;
-}
