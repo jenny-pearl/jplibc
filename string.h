@@ -1,19 +1,40 @@
-#include <stdint.h>
-#include <stdlib.h>
-
 #ifndef STRING_H_
 #define STRING_H_
 
+#include <stdarg.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <stdlib.h>
+#include <stdint.h>
+
+#include "io.h"
+
+#define bool _Bool
+#define true 1
+#define false 0
+
 typedef struct {
 	int64_t count;
-	int8_t* items;
-} sv;
+	char* data;
+} StaticString;
 
 typedef struct {
 	int64_t count;
 	int64_t capacity;
-	int8_t* items;
-} string;
+	char* data;
+} DynamicString;
+
+char scratch_buffer[8 * 1024];
+
+int64_t cstring_length(const char* format)
+{
+	int64_t i = 0;
+
+	for (; format[i] != '\0'; i += 1);
+
+	return i;
+}
 
 void memory_zero(void* destination, size_t length)
 {
@@ -24,7 +45,7 @@ void memory_zero(void* destination, size_t length)
 		*word++ = 0;
 	}
 
-	char* byte = word;
+	char* byte = (char*)word;
 	size_t single_bytes = length % sizeof(length);
 
 	for (int64_t i = 0; i < single_bytes; i += 1) {
@@ -32,148 +53,195 @@ void memory_zero(void* destination, size_t length)
 	}
 }
 
-void *memory_copy(void *destination, void *source, int64_t size)
+void memory_copy(void *destination, void *source, size_t size)
 {
-	if (!destination || !source) {
-		return NULL;
+	size_t* dst = destination;
+	size_t* src = source;
+	size_t count = size / sizeof(size);
+
+	for (int64_t i = 0; i < count; i += 1) {
+		*dst++ = *src++;
 	}
 
-	for (int64_t i = 0; i < size; i += 1) {
-		*(char *)(destination + i) = *(char *)(source + i);
+	char* dst_byte = (char*)dst;
+	char* src_byte = (char*)src;
+	size_t single_bytes = size % sizeof(size);
+
+	for (int64_t i = 0; i < single_bytes; i += 1) {
+		*dst_byte++ = *src_byte++;
+	}
+}
+
+void append_cstring_to_dynamic_string(char* cstring, DynamicString* string)
+{
+	int64_t string_length = cstring_length(cstring);
+	int64_t available = string->capacity - string->count;
+
+	if (available < string_length) {
+		string->capacity += string_length;
+		string->data = realloc(string->data, string->capacity * sizeof(char));
 	}
 
-	return destination;
+	if (string->data == 0) return;
+
+	memory_copy(string->data + string->count * sizeof(char), cstring, string_length);
+
+	return;
 }
 
-int64_t cstr_length(char *format)
+DynamicString dynamic_string_from_cstring(char* format)
 {
-	int64_t i = 0;
+	int64_t size = cstring_length(format);
 
-	for (; format[i] != '\0'; i += 1)
-		;
-
-	return i;
-}
-
-string string_from_cstr(char *format)
-{
-	int64_t size = cstr_length(format);
-
-	string str = {
+	DynamicString string = {
+		.data = malloc(sizeof(char) * size),
+		.count = size,
 		.capacity = size,
-		.count = size,
-		.content = malloc(sizeof(char) * size),
 	};
 
-	memory_copy(str.content, format, sizeof(char) * size);
+	memory_copy(string.data, format, sizeof(char) * size);
 
-	return str;
+	return string;
 }
 
-sv sv_from_cstr(char *format)
+StaticString static_string_from_cstring(const char* format)
 {
-	int64_t size = cstr_length(format);
+	int64_t size = cstring_length(format);
 
-	sv view = {
+	StaticString string = {
+		.data = malloc(sizeof(char) * size),
 		.count = size,
-		.content = malloc(sizeof(char) * size),
 	};
 
-	memory_copy(view.content, format, sizeof(char) * size);
+	memory_copy(string.data, format, sizeof(char) * size);
 
-	return view;
+	return string;
 }
 
-void string_concat_string(string *first, string second)
+bool dynamic_string_equal(DynamicString first, DynamicString second)
 {
-	if (second.count == 0) {
-		return;
+	if (first.count != second.count) {
+		return false;
 	}
 
-	int64_t prevSize = first->count;
-
-	first->count += second.count;
-
-	if (first->count > first->capacity) {
-		first->capacity = first->count;
-		first->content = realloc(first->content, first->capacity * sizeof(char));
-	}
-
-	memory_copy(first->content + prevSize, second.content, second.count);
-}
-
-int64_t cstr_compare(char *first, char *second)
-{
-	int64_t i = 0;
-
-	for (; first[i] != '\0' && second[i] != '\0'; i += 1) {
-		if (first[i] > second[i]) {
-			return 1;
-		} else if (first[i] < second[i]) {
-			return -1;
+	for (int64_t i = 0; i < first.count; i += 1) {
+		if (first.data[i] != second.data[i]) {
+			return false;
 		}
 	}
 
-	if (first[i] != '\0') {
-		return 1;
-	} else if (second[i] != '\0') {
-		return -1;
-	}
-
-	return 0;
+	return true;
 }
 
-int64_t string_compare(string first, string second)
+bool static_string_equal(StaticString first, StaticString second)
 {
-	int64_t i = 0;
+	if (first.count != second.count) {
+		return false;
+	}
 
-	for (; i < first.count && i < second.count; i += 1) {
-		if (first.content[i] > second.content[i]) {
-			return 1;
-		} else if (first.content[i] < second.content[i]) {
-			return -1;
+	for (int64_t i = 0; i < first.count; i += 1) {
+		if (first.data[i] != second.data[i]) {
+			return false;
 		}
 	}
 
-	if (i < first.count) {
-		return 1;
-	} else if (i < second.count) {
-		return -1;
-	}
-
-	return 0;
+	return true;
 }
 
-int64_t sv_compare(sv first, sv second)
+DynamicString dynamic_string_from_static_string(StaticString string)
 {
-	int64_t i = 0;
+	DynamicString result = {
+		.data = malloc(sizeof(char) * string.count),
+		.count = string.count,
+		.capacity = string.count,
+	};
 
-	for (; i < first.count && i < second.count; i += 1) {
-		if (first.content[i] > second.content[i]) {
-			return 1;
-		} else if (first.content[i] < second.content[i]) {
-			return -1;
-		}
-	}
+	memory_copy(string.data, result.data, string.count * sizeof(char));
 
-	if (i < first.count) {
-		return 1;
-	} else if (i < second.count) {
-		return -1;
-	}
-
-	return 0;
+	return result;
 }
 
-int64_t string_symbol_occur(string whole, char c)
+StaticString static_string_from_dynamic_string(DynamicString string)
 {
-	int64_t index = 0;
+	StaticString result = {
+		.data = malloc(sizeof(char) * string.count),
+		.count = string.count,
+	};
 
-	while (whole.content[index] != c) {
-		index += 1;
+	memory_copy(result.data, string.data, string.count * sizeof(char));
+
+	return result;
+}
+
+StaticString tokenize_by_delimiter(StaticString* string, char delimiter)
+{
+	int64_t token_end = 0;
+	int64_t remaining_start = 0;
+
+	StaticString result = {
+		.data = string->data,
+		.count = 0,
+	};
+
+	for (; token_end < string->count && string->data[token_end] != delimiter; token_end += 1);
+
+	for (remaining_start = token_end;
+		remaining_start < string->count && string->data[remaining_start] == delimiter;
+		remaining_start += 1);
+
+	string->data += remaining_start;
+	string->count -= remaining_start;
+
+	result.count += token_end;
+
+	return result;
+}
+
+StaticString tokenize_by_function(StaticString* string, int(*function)(int))
+{
+	int64_t token_end = 0;
+	int64_t remaining_start = 0;
+
+	StaticString result = {
+		.data = string->data,
+		.count = 0,
+	};
+
+	for (; token_end < string->count && !function(string->data[token_end]); token_end += 1);
+
+	for (remaining_start = token_end;
+		remaining_start < string->count && function(string->data[remaining_start]);
+		remaining_start += 1);
+
+	string->data += remaining_start;
+	string->count -= remaining_start;
+
+	result.count += token_end;
+
+	return result;
+}
+
+int append_format_string_to_dynamic_string(DynamicString* string, char* cstring, ...)
+{
+	va_list args;
+	va_start(args, cstring);
+
+	int count = _print_implementation(NULL, cstring, args);
+
+	int available = string->capacity - string->count;
+
+	if (available < count) {
+		string->capacity += count;
+		string->data = realloc(string->data, string->capacity);
 	}
 
-	return index;
+	standard_io_buffer_length = 0;
+
+	memory_copy(string->data + string->count, standard_io_buffer, count);
+
+	string->count += count;
+
+	return count;
 }
 
 #endif // STRING_H_
