@@ -3,10 +3,12 @@
 
 #include <unistd.h>
 #include <stdlib.h>
-#include <stdio.h>
 #include <stdarg.h>
+#include <stdio.h>
 
-#define bool _Bool
+#define UNREACHABLE()\
+        fprintf(stderr, "%s:%d:%s UNREACHABLE\n", __FILE__, __LINE__, __func__);\
+        exit(1)
 
 char standard_io_buffer[1 << 20];
 int64_t standard_io_buffer_length = 0;
@@ -31,11 +33,23 @@ int read_integer_to_buffer(char* buffer, int64_t* buffer_length, int64_t number)
 int read_float_to_buffer(char* buffer, int64_t* buffer_length, double number);
 int read_hexadecimal_to_buffer(char* buffer, int64_t* buffer_length, int64_t number);
 int read_octal_to_buffer(char* buffer, int64_t* buffer_length, int64_t number);
-int parse_arg_with_kind(char* buffer, int64_t* buffer_length, Kind kind, va_list args);
-int _print_implementation(char* string, char* format, va_list args);
+int parse_arg_with_kind(char* buffer, int64_t* buffer_length, Kind kind, va_list* args);
+int _print_implementation(char* string, char* format, int fd, va_list* args);
 int print(char* format, ...);
 int fprint(int fd, char* format, ...);
 int sprint(char* buffer, char* format, ...);
+
+char* shift_args(int* argc, char*** argv)
+{
+        if (*argc == 0) {
+                return 0;
+        }
+
+        *argc -= 1;
+        *argv += 1;
+
+        return *(*argv - 1);
+}
 
 Kind parse_option(char* format, int64_t* i)
 {
@@ -75,15 +89,24 @@ int flush(int fd)
 
 int read_integer_to_buffer(char* buffer, int64_t* buffer_length, int64_t number)
 {
-	int64_t digit_count = 1;
-	int64_t temp = number / 10;
+	int64_t digit_count = 0;
 
-	while (temp) {
-		temp /= 10;
-		digit_count += 1;
+	if (number < 0) {
+		number = -number;
+		buffer[*buffer_length] = '-';
+		*buffer_length += 1;
 	}
 
-	int count = digit_count;
+        {
+                int64_t temp = number;
+
+                do {
+                        temp /= 10;
+                        digit_count += 1;
+                } while (temp);
+        }
+
+	int64_t count = digit_count;
 
 	do {
 		buffer[*buffer_length + digit_count - 1] = (number % 10) + '0';
@@ -91,7 +114,7 @@ int read_integer_to_buffer(char* buffer, int64_t* buffer_length, int64_t number)
 		number /= 10;
 	} while (number);
 
-	*buffer_length += count;
+	(*buffer_length) += count;
 
 	return count;
 }
@@ -194,7 +217,7 @@ int read_octal_to_buffer(char* buffer, int64_t* buffer_length, int64_t number)
 	return count;
 }
 
-int parse_arg_with_kind(char* buffer, int64_t* buffer_length, Kind kind, va_list args)
+int parse_arg_with_kind(char* buffer, int64_t* buffer_length, Kind kind, va_list* args)
 {
 	char* pointer = 0;
 	int64_t sval = 0;
@@ -206,20 +229,20 @@ int parse_arg_with_kind(char* buffer, int64_t* buffer_length, Kind kind, va_list
 		*buffer_length += 1;
 		break;
 	case OCTAL:
-		sval = va_arg(args, int64_t);
+		sval = va_arg(*args, int64_t);
 		read_octal_to_buffer(buffer, buffer_length, sval);
 		break;
 	case POINTER:
 	case HEXADECIMAL:
-		sval = va_arg(args, int64_t);
+		sval = va_arg(*args, int64_t);
 		read_hexadecimal_to_buffer(buffer, buffer_length, sval);
 		break;
 	case CHAR:
-		buffer[*buffer_length] = va_arg(args, char);
+		buffer[*buffer_length] = va_arg(*args, int);
 		*buffer_length += 1;
 		break;
 	case CSTRING:
-		pointer = va_arg(args, char*);
+		pointer = va_arg(*args, char*);
 		while (pointer) {
 			buffer[*buffer_length] = *pointer;
 			*buffer_length += 1;
@@ -227,23 +250,27 @@ int parse_arg_with_kind(char* buffer, int64_t* buffer_length, Kind kind, va_list
 		}
 		break;
 	case STRING:
-		sval = va_arg(args, int64_t);
-		pointer = va_arg(args, char*);
+		sval = va_arg(*args, int64_t);
+		pointer = va_arg(*args, char*);
 		for (int64_t i = 0; i < sval; i += 1) {
 			buffer[*buffer_length] = pointer[i];
 			*buffer_length += 1;
 		}
 		break;
 	case INT:
-		sval = va_arg(args, int64_t);
+		sval = va_arg(*args, int64_t);
 		read_integer_to_buffer(buffer, buffer_length, sval);
 		break;
 	case FLOAT:
-		dval = va_arg(args, double);
+		dval = va_arg(*args, double);
 		read_float_to_buffer(buffer, buffer_length, dval);
 		break;
+        case _null:
+                fprint(STDERR_FILENO, "Unexpected null at index %d in format string\n", buffer_length);
+        case __Kind_count:
+                UNREACHABLE();
 	default:
-		write(1, "exhaustion of type of variables to print\n", 41 * sizeof(char));
+		print("Exhaustion of type of variables to print\n");
 		return -1;
 	}
 
@@ -254,7 +281,7 @@ int print(char* format, ...)
 {
 	va_list args;
 	va_start(args, format);
-	int count = _print_implementation(NULL, format, args);
+	int count = _print_implementation(0, format, 1, &args);
 	flush(1);
 	return count;
 }
@@ -263,7 +290,7 @@ int fprint(int fd, char* format, ...)
 {
 	va_list args;
 	va_start(args, format);
-	int count = _print_implementation(NULL, format, args);\
+	int count = _print_implementation(0, format, fd, &args);
 	flush(fd);
 	return count;
 }
@@ -272,13 +299,13 @@ int sprint(char* buffer, char* format, ...)
 {
 	va_list args;
 	va_start(args, format);
-	int count = _print_implementation(buffer, format, args);
+	int count = _print_implementation(buffer, format, -1, &args);
 	return count;
 }
 
-int _print_implementation(char* string, char* format, va_list args)
+int _print_implementation(char* string, char* format, int fd, va_list* args)
 {
-	if (string == NULL) {
+	if (string == 0) {
 		string = standard_io_buffer;
 	}
 
@@ -286,7 +313,14 @@ int _print_implementation(char* string, char* format, va_list args)
 
 	for (int64_t i = 0; format[i] != '\0'; i += 1) {
 		switch (format[i]) {
-		case 37: {
+                case '\n': {
+                        string[string_length] = format[i];
+                        string_length += 1;
+                        if (fd != -1) {
+                                flush(fd);
+                        }
+                } break;
+		case '%': {
 			i += 1;
 			Kind kind = parse_option(format, &i);
 
@@ -304,10 +338,10 @@ int _print_implementation(char* string, char* format, va_list args)
 	}
 
 	if (string == standard_io_buffer) {
-		standard_io_buffer_length = string_length;
+		standard_io_buffer_length += string_length;
 	}
 
-	va_end(args);
+	va_end(*args);
 
 	return string_length;
 }

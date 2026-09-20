@@ -11,7 +11,7 @@
 #include "string.h"
 
 #define file_open(filename, ...) \
-	_file_open_implementation(filename, (FileOptions) { __VA_ARGS__ })
+	_file_open_implementation((filename), (FileOptions) { __VA_ARGS__ })
 
 typedef struct {
 	bool write;
@@ -20,10 +20,10 @@ typedef struct {
 	bool log_errors;
 } FileOptions;
 
-void read_file_to_string(int fd, DynamicString* string);
+void read_file_to_string(int fd, DS* string);
 int64_t file_size(int fd);
 int _file_open_implementation(char* filename, FileOptions options);
-void write_string_to_file(DynamicString string, int fd);
+void write_string_to_file(DS string, int fd);
 int file_close(int fd);
 
 int file_exists(char* filename)
@@ -59,7 +59,7 @@ int file_close(int fd)
 	return close(fd);
 }
 
-void write_string_to_file(DynamicString string, int fd)
+void write_string_to_file(DS string, int fd)
 {
 	write(fd, string.data, string.count * sizeof(char));
 }
@@ -71,16 +71,16 @@ int64_t file_size(int fd)
 	return st.st_size;
 }
 
-void read_file_to_string(int fd, DynamicString* string)
+void read_file_to_string(int fd, DS* string)
 {
 	int64_t size = file_size(fd);
 
-	if (string->capacity < size) {
-		string->capacity = size;
+	if (string->capacity - string->count < size) {
+		string->capacity += size;
 		string->data = realloc(string->data, string->capacity * sizeof(char));
 	}
 
-	int nbytes = read(fd, string->data, sizeof(char) * size);
+	int nbytes = read(fd, string->data + string->count, sizeof(char) * size);
 
 	if (nbytes == -1) {
 		perror("read");
